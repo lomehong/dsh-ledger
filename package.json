@@ -1,7 +1,7 @@
 {
   "name": "@dsh-extra/dsh-ledger",
-  "version": "0.1.0",
-  "description": "数字分身 · 委托账本：L0-L3 委托级别裁决、授权记录（通道签名机械落账）、执行闸、结果回填与事后否决率统计。实施计划 T2/T6。",
+  "version": "0.1.1",
+  "description": "v2：feedback 推翻信号软依赖入队 dsh-twin 学习闭环（缺席静默）",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

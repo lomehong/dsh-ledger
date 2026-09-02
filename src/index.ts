@@ -291,6 +291,22 @@ export function apply(ctx: unknown): void {
                 body.feedbackOnly === true
                   ? feedback(String(body.recordId ?? ''), body.masterFeedback, body.summary)
                   : fillResult(String(body.recordId ?? ''), { summary: body.summary, masterFeedback: body.masterFeedback })
+              // v2 学习闭环：否决信号软依赖入队（dsh-twin 在位时；缺失静默跳过）
+              if (r.ok && body.masterFeedback === '推翻') {
+                try {
+                  const twin = c.get?.('dsh-twin') as { enqueueLearning?: (i: unknown) => unknown } | undefined
+                  const rec = r.record
+                  twin?.enqueueLearning?.({
+                    kind: '否决',
+                    target: '策略卡',
+                    signal: `${rec?.actionType ?? '动作'}：${rec?.target?.scope ?? ''} 被主人推翻`,
+                    ref: rec?.id,
+                    by: '主人',
+                  })
+                } catch {
+                  // 学习闭环缺席不阻断账本反馈
+                }
+              }
               respondJson(res, r.ok ? 200 : 400, r)
             } catch (e) {
               respondJson(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) })
