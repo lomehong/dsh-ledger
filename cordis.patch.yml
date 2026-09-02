@@ -1,0 +1,5 @@
+- insert:
+    - id: dsh-ledger
+      name: '@dsh-extra/dsh-ledger'
+      inject: []
+      config: {}

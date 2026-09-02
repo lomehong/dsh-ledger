@@ -1,0 +1,38 @@
+{
+  "name": "@dsh-extra/dsh-ledger",
+  "version": "0.1.0",
+  "description": "数字分身 · 委托账本：L0-L3 委托级别裁决、授权记录（通道签名机械落账）、执行闸、结果回填与事后否决率统计。实施计划 T2/T6。",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./ledger": {
+      "types": "./lib/types/ledger.d.ts",
+      "default": "./lib/ledger.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -b tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0-rc.0"
+  }
+}
