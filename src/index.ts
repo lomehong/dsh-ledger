@@ -22,7 +22,6 @@ import {
   pendingApprovals,
   records,
   rejectApproval,
-  markExecutedForAction,
   revoke,
   selfCheck,
   setNowForTest,
@@ -159,16 +158,22 @@ export function apply(ctx: unknown): void {
     log(c.logger?.warn, '[dsh-ledger] provide 失败:', e instanceof Error ? e.message : String(e))
   }
 
-  // 执行闸：防御性挂接 tools/pre-execute waterfall。
-  // 宿主事件面形态可能变化：挂接失败绝不静默——记入 health.issues 并告警。
+  // 执行闸（宪章 #01 / F-01 按宿主真实契约重写，参考 packages/core/tools prepareExecution）：
+  //   waterfall('tools/pre-execute', exec, () => ({ kind: 'allow' }))
+  //   exec 携带 name/arguments/callId/agent；闸决策 = PreToolDecision：
+  //     { kind: 'allow' } 放行 / { kind: 'deny', reason } 拒绝（宿主 materialize `Error: ${reason}`）
+  // 放行时登记 callId → recordId，供 tools/post-execute 留痕（已放行 → 已执行闭环）。
+  const allowedByCallId = new Map<string, { id: string; at: number }>()
   try {
     if (typeof c.on === 'function') {
-      const handler = (payload: unknown) => {
-        // 事件载荷：{ tool, args }（结构化视图；字段缺失时放行并留痕，闸门兜底在服务侧）
-        const p = payload as { tool?: unknown; args?: Record<string, unknown> } | undefined
-        const actionType = typeof p?.args?.actionType === 'string' ? (p.args.actionType as string) : typeof p?.tool === 'string' ? p.tool : ''
-        if (actionType === '') return { action: 'allow' as const }
-        const args = (p?.args ?? {}) as Record<string, unknown>
+      // 本仓库的 cordis 泛型未声明本事件的多参形态——宽松挂接（运行时为 waterfall 多参）
+      const onGate = c.on as unknown as
+        (event: string, listener: (exec: unknown, next: (prepared?: unknown) => Promise<unknown>) => Promise<unknown>) => void
+      onGate('tools/pre-execute', async (exec: unknown, next: (prepared?: unknown) => Promise<unknown>) => {
+        const e = exec as { name?: unknown; arguments?: unknown; callId?: unknown }
+        const args = (e?.arguments ?? {}) as Record<string, unknown>
+        const actionType = typeof args.actionType === 'string' ? args.actionType : typeof e?.name === 'string' ? e.name : ''
+        if (actionType === '') return await next()
         const input: CheckInput = {
           actionType,
           targetScope: typeof args.targetScope === 'string' ? args.targetScope : actionType,
@@ -179,18 +184,22 @@ export function apply(ctx: unknown): void {
         if (actor.registryId !== undefined || actor.channel !== undefined) input.actor = actor
         if (typeof args.levelHint === 'string') input.levelHint = args.levelHint
         const result = check(input)
-        if (result.judgment.decision === '放行') return { action: 'allow' as const, recordId: result.record.id }
-        return {
-          action: 'deny' as const,
-          recordId: result.record.id,
-          approvalId: result.approval?.id,
-          message: result.judgment.reason,
+        if (result.judgment.decision !== '放行') {
+          return { kind: 'deny' as const, reason: result.judgment.reason ?? ('账本裁决：' + result.judgment.decision) }
         }
-      }
-      c.on('tools/pre-execute', handler)
+        // 留痕登记：callId → recordId（post-execute 据此 markExecuted；容量封顶防泄漏）
+        if (typeof e.callId === 'string' && e.callId !== '') {
+          allowedByCallId.set(e.callId, { id: result.record.id, at: Date.now() })
+          if (allowedByCallId.size > 500) {
+            const oldest = [...allowedByCallId.entries()].sort((a, b) => a[1].at - b[1].at)[0]
+            if (oldest !== undefined) allowedByCallId.delete(oldest[0])
+          }
+        }
+        return { kind: 'allow' as const }
+      })
       health.gateAttached = true
-      health.gateChannel = 'tools/pre-execute'
-      log(c.logger?.info, '[dsh-ledger] 执行闸已挂接 tools/pre-execute')
+      health.gateChannel = 'tools/pre-execute（waterfall exec/next → PreToolDecision；deny={kind,reason}）'
+      log(c.logger?.info, '[dsh-ledger] 执行闸已挂接 tools/pre-execute（宿主契约 exec.name/arguments → PreToolDecision）')
     } else {
       health.issues.push('宿主未提供事件面（ctx.on），执行闸未挂接——账本仅记录不拦截')
       log(c.logger?.warn, '[dsh-ledger] 宿主未提供事件面，执行闸未挂接')
@@ -209,18 +218,14 @@ export function apply(ctx: unknown): void {
       const onPost = c.on as unknown as (event: string, listener: (exec: unknown, result: unknown, next: () => Promise<unknown>) => Promise<unknown>) => void
       onPost('tools/post-execute', async (exec: unknown, result: unknown, next: () => Promise<unknown>) => {
         try {
-          const e2 = exec as { name?: unknown; args?: Record<string, unknown> } | undefined
-          const r2 = result as { isError?: unknown } | undefined
-          if (r2?.isError !== true) {
-            const args = (e2?.args ?? {}) as Record<string, unknown>
-            const actionType = typeof args.actionType === 'string' ? args.actionType : typeof e2?.name === 'string' ? e2.name : ''
-            if (actionType !== '') {
-              const targetScope = typeof args.targetScope === 'string' ? args.targetScope : undefined
-              const marked = markExecutedForAction(actionType, targetScope)
-              if (!marked.ok && marked.error !== '无匹配的已放行记录') {
-                log(c.logger?.warn, '[dsh-ledger] 执行留痕失败:', marked.error ?? '')
-              }
-            }
+          const e2 = exec as { callId?: unknown } | undefined
+          const key = typeof e2?.callId === 'string' ? e2.callId : ''
+          const hit = key !== '' ? allowedByCallId.get(key) : undefined
+          if (hit !== undefined) {
+            allowedByCallId.delete(key)
+            // isError 亦留痕：错误同样是一次真实执行（审计不缺页）
+            const marked = markExecuted(hit.id)
+            if (!marked.ok) log(c.logger?.warn, '[dsh-ledger] 执行留痕失败:', marked.error ?? '')
           }
         } catch { /* 留痕失败不影响工具结果 */ }
         return await next()
@@ -265,6 +270,16 @@ export function apply(ctx: unknown): void {
               records: records(filter),
               activeGrants: grants(true),
             })
+          },
+        }),
+      )
+      disposers.push(
+        web.register({
+          kind: 'exact',
+          path: '/dsh-ledger/approvals',
+          handler: (_req: unknown, res: unknown) => {
+            // 宪章 F-04：待批审批列表（今日待办渲染批准/驳回按钮的数据面）
+            respondJson(res as ResponseLike, 200, { ok: true, approvals: pendingApprovals() })
           },
         }),
       )
