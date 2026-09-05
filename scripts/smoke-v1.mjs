@@ -7,9 +7,9 @@
  * 运行前必须设置 USERPROFILE 指向全新临时目录：
  *   USERPROFILE=<tmp> node scripts/smoke-v1.mjs
  */
-import { provision, bindMaster, resolve } from 'file:///D:/development/Coder/nodejs/dsh/dsh-actors/lib/registry.js'
-import { check, approve, markExecuted, fillResult, feedback, stats, records } from 'file:///D:/development/Coder/nodejs/dsh/dsh-ledger/lib/ledger.js'
-import { runRegression } from 'file:///D:/development/Coder/nodejs/dsh/dsh-regression/lib/runner.js'
+import { provision, bindMaster, resolve } from '../../../dsh-actors/lib/registry.js'
+import { check, approve, markExecuted, fillResult, feedback, stats, records } from '../lib/ledger.js'
+import { runRegression } from '../../../dsh-regression/lib/runner.js'
 import { createScriptedRunner } from 'file:///D:/development/Coder/nodejs/dsh/dsh-regression/lib/index.js'
 
 let failed = 0

@@ -22,6 +22,7 @@ import {
   pendingApprovals,
   records,
   rejectApproval,
+  markExecutedForAction,
   revoke,
   selfCheck,
   setNowForTest,
@@ -197,6 +198,39 @@ export function apply(ctx: unknown): void {
   } catch (e) {
     health.issues.push('执行闸挂接异常：' + (e instanceof Error ? e.message : String(e)))
     log(c.logger?.warn, '[dsh-ledger] 执行闸挂接异常:', e instanceof Error ? e.message : String(e))
+  }
+
+  // 执行后留痕：把「已放行 → 已执行」状态闭环（宪章第二阶段挂链）。
+  // 只在工具成功时标记（isError 不留执行态）；无匹配记录时静默——
+  // 并非每次工具调用都经过执行闸（未声明 actionType 的旁路调用）。
+  try {
+    if (typeof c.on === 'function') {
+      // 该仓库的 cordis 泛型未声明本事件的 (exec, result, next) 三参形态——宽松挂接
+      const onPost = c.on as unknown as (event: string, listener: (exec: unknown, result: unknown, next: () => Promise<unknown>) => Promise<unknown>) => void
+      onPost('tools/post-execute', async (exec: unknown, result: unknown, next: () => Promise<unknown>) => {
+        try {
+          const e2 = exec as { name?: unknown; args?: Record<string, unknown> } | undefined
+          const r2 = result as { isError?: unknown } | undefined
+          if (r2?.isError !== true) {
+            const args = (e2?.args ?? {}) as Record<string, unknown>
+            const actionType = typeof args.actionType === 'string' ? args.actionType : typeof e2?.name === 'string' ? e2.name : ''
+            if (actionType !== '') {
+              const targetScope = typeof args.targetScope === 'string' ? args.targetScope : undefined
+              const marked = markExecutedForAction(actionType, targetScope)
+              if (!marked.ok && marked.error !== '无匹配的已放行记录') {
+                log(c.logger?.warn, '[dsh-ledger] 执行留痕失败:', marked.error ?? '')
+              }
+            }
+          }
+        } catch { /* 留痕失败不影响工具结果 */ }
+        return await next()
+      })
+      health.gateChannel = 'tools/pre-execute + tools/post-execute'
+      log(c.logger?.info, '[dsh-ledger] 执行留痕已挂接 tools/post-execute')
+    }
+  } catch (e) {
+    health.issues.push('执行留痕挂接异常：' + (e instanceof Error ? e.message : String(e)))
+    log(c.logger?.warn, '[dsh-ledger] 执行留痕挂接异常:', e instanceof Error ? e.message : String(e))
   }
 
   // 管理路由（可选）

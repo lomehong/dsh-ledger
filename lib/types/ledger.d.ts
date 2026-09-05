@@ -142,6 +142,12 @@ export declare function rejectApproval(approvalId: string, by?: {
 }): ResolveResult;
 /** 标记已执行（post-execute 钩）：工具真的跑完了 */
 export declare function markExecuted(recordId: string): ResolveResult;
+/**
+ * 按动作匹配把最近一条「已放行」记录标记为已执行（tools/post-execute 钩子消费）。
+ * 匹配口径与执行闸一致：actionType 精确匹配；targetScope 提供时一并校验。
+ * 找不到匹配记录返回 ok=false（并非每次工具调用都过执行闸，属正常旁路）。
+ */
+export declare function markExecutedForAction(actionType: string, targetScope?: string): ResolveResult;
 export interface OutcomeInput {
     summary: unknown;
     masterFeedback?: unknown;

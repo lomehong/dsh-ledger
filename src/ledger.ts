@@ -419,6 +419,23 @@ export function markExecuted(recordId: string): ResolveResult {
   return { ok: true, record }
 }
 
+/**
+ * 按动作匹配把最近一条「已放行」记录标记为已执行（tools/post-execute 钩子消费）。
+ * 匹配口径与执行闸一致：actionType 精确匹配；targetScope 提供时一并校验。
+ * 找不到匹配记录返回 ok=false（并非每次工具调用都过执行闸，属正常旁路）。
+ */
+export function markExecutedForAction(actionType: string, targetScope?: string): ResolveResult {
+  const store = loadLedger()
+  const candidates = store.records.filter(
+    (r) => r.actionType === actionType && r.status === '已放行' && (targetScope === undefined || r.target.scope === targetScope),
+  )
+  const record = candidates[candidates.length - 1]
+  if (record === undefined) return { ok: false, error: '无匹配的已放行记录' }
+  appendHistory(record, '已执行', '工具执行完成')
+  saveLedger(store)
+  return { ok: true, record }
+}
+
 export interface OutcomeInput {
   summary: unknown
   masterFeedback?: unknown
