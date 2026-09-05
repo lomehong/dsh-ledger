@@ -102,6 +102,10 @@ function respondJson(res: ResponseLike, status: number, data: unknown): void {
 interface Health {
   gateAttached: boolean
   gateChannel: string
+  /** 闸策略说明（opt-in：仅裁决显式声明 actionType 的工具） */
+  gatePolicy?: string
+  /** 挂接后策略探针是否通过 */
+  gatePolicyProbe?: 'ok' | 'failed'
   issues: string[]
   startedAt: string
 }
@@ -169,11 +173,19 @@ export function apply(ctx: unknown): void {
       // 本仓库的 cordis 泛型未声明本事件的多参形态——宽松挂接（运行时为 waterfall 多参）
       const onGate = c.on as unknown as
         (event: string, listener: (exec: unknown, next: (prepared?: unknown) => Promise<unknown>) => Promise<unknown>) => void
+      // 闸策略（事故复盘 2026-09-05 根治）：只裁决**显式声明治理意图**的调用
+      // （args.actionType 在场，如主动汇报类工具）。普通工作工具
+      // （read/pwsh/grep/bash/memory/yuyi…）不声明治理意图 → 一律放行——
+      // 主人日常会话全能力（决策六），分身基础能力不因治理层存在而受限。
+      // 不可按工具名兜底裁决：DEFAULT_LEVELS 面向对外动作，未知名兜底 L2
+      // 会把整套日常工作工具拦死（同日事故根因）。
+      const gateDecide = (args: Record<string, unknown>): 'pass' | 'adjudicate' =>
+        typeof args.actionType === 'string' && args.actionType !== '' ? 'adjudicate' : 'pass'
       onGate('tools/pre-execute', async (exec: unknown, next: (prepared?: unknown) => Promise<unknown>) => {
         const e = exec as { name?: unknown; arguments?: unknown; callId?: unknown }
         const args = (e?.arguments ?? {}) as Record<string, unknown>
-        const actionType = typeof args.actionType === 'string' ? args.actionType : typeof e?.name === 'string' ? e.name : ''
-        if (actionType === '') return await next()
+        if (gateDecide(args) === 'pass') return await next()
+        const actionType = String(args.actionType)
         const input: CheckInput = {
           actionType,
           targetScope: typeof args.targetScope === 'string' ? args.targetScope : actionType,
@@ -199,7 +211,14 @@ export function apply(ctx: unknown): void {
       })
       health.gateAttached = true
       health.gateChannel = 'tools/pre-execute（waterfall exec/next → PreToolDecision；deny={kind,reason}）'
-      log(c.logger?.info, '[dsh-ledger] 执行闸已挂接 tools/pre-execute（宿主契约 exec.name/arguments → PreToolDecision）')
+      health.gatePolicy = 'opt-in：仅裁决显式声明 actionType 的工具；未声明一律放行（决策六）'
+      // 策略探针（宪章审计 C-③）：日常工具调用必须放行——闸绝不能瘫痪分身
+      const probePass = gateDecide({ actionType: '主动汇报', targetScope: 'x' }) === 'adjudicate'
+        && gateDecide({}) === 'pass'
+        && gateDecide({ actionType: '' }) === 'pass'
+      health.gatePolicyProbe = probePass ? 'ok' : 'failed'
+      if (!probePass) health.issues.push('闸策略探针失败：未声明 actionType 的工具未放行')
+      log(c.logger?.info, '[dsh-ledger] 执行闸已挂接 tools/pre-execute（opt-in 策略探针 ' + (probePass ? 'ok' : 'FAILED') + '）')
     } else {
       health.issues.push('宿主未提供事件面（ctx.on），执行闸未挂接——账本仅记录不拦截')
       log(c.logger?.warn, '[dsh-ledger] 宿主未提供事件面，执行闸未挂接')
