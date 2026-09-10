@@ -1,6 +1,6 @@
 {
   "name": "@dsh-extra/dsh-ledger",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "v2：feedback 推翻信号软依赖入队 dsh-twin 学习闭环（缺席静默）",
   "license": "MIT",
   "type": "module",
